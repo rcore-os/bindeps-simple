@@ -142,6 +142,8 @@ impl BinCrate {
         cargo
             .args(["build", "-Z", "unstable-options", "--release", "--target"])
             .arg(&self.target)
+            .arg("--target-dir")
+            .arg(self.output_dir.join(format!("{}-target", self.name)))
             .arg("--artifact-dir")
             .arg(&self.output_dir)
             .env_clear()
