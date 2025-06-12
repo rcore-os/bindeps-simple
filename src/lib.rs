@@ -28,6 +28,16 @@ impl Builder {
         }
     }
 
+    pub fn env(mut self, key: &str, value: &str) -> Self {
+        self.env.push((key.to_string(), value.to_string()));
+        self
+    }
+
+    pub fn feature(mut self, feature: &str) -> Self {
+        self.features.push(feature.to_string());
+        self
+    }
+
     pub fn build(self) -> Result<()> {
         let output_dir = self
             .output_dir
