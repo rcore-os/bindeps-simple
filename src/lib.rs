@@ -94,15 +94,36 @@ pub struct BinCrate {
 
 impl BinCrate {
     pub fn run(&mut self) -> Result<()> {
+        self.base_dir = std::env::temp_dir()
+            .canonicalize()
+            .unwrap()
+            .join("rust-bindeps-simple");
+        println!("tmp  dir: {}", self.base_dir.display());
+        create_dir_all(&self.base_dir).context("创建目录失败")?;
+
         if let Some(source_dir) = &self.source_dir {
-            self.crate_dir = source_dir.to_path_buf();
+            use rand::seq::IndexedRandom;
+            let mut rng = &mut rand::rng();
+            let sample =
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".as_bytes();
+            let suffix = sample
+                .choose_multiple(&mut rng, 12)
+                .cloned()
+                .collect::<Vec<_>>();
+
+            let suffix = String::from_utf8_lossy(&suffix);
+
+            // 构建 crate 唯一标识目录 (如 target/tmp/serde-1.0.0)
+            self.crate_dir = self.base_dir.join(format!("{}-{}", self.name, suffix));
+            if self.crate_dir.exists() {
+                // 删除目录
+                std::fs::remove_dir_all(&self.crate_dir).unwrap();
+            }
+            std::fs::create_dir_all(&self.crate_dir).unwrap();
+
+            // 复制 source_dir 内容到 crate_dir
+            copy_dir_recursive(source_dir, &self.crate_dir)?;
         } else {
-            self.base_dir = std::env::temp_dir()
-                .canonicalize()
-                .unwrap()
-                .join("rust-bindeps-simple");
-            println!("tmp  dir: {}", self.base_dir.display());
-            create_dir_all(&self.base_dir).context("创建目录失败")?;
             // 构建 crate 唯一标识目录 (如 target/tmp/serde-1.0.0)
             self.crate_dir = self
                 .base_dir
@@ -168,6 +189,8 @@ impl BinCrate {
         cargo
             .args(["build", "-Z", "unstable-options", "--release", "--target"])
             .arg(&self.target)
+            .arg("-p")
+            .arg(&self.name)
             .arg("--target-dir")
             .arg(self.output_dir.join(format!("{}-target", self.name)))
             .arg("--artifact-dir")
@@ -200,4 +223,25 @@ impl BinCrate {
 
         Ok(())
     }
+}
+
+// 递归复制函数
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if !dst.exists() {
+        create_dir_all(dst)?;
+    }
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+
+    Ok(())
 }
