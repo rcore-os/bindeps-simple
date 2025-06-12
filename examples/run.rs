@@ -8,7 +8,6 @@ fn main() {
     let mut builder = Builder::new(
         "pie-boot-loader-aarch64",
         "0.1.2",
-        &Path::new(&mf).join("target"),
         "aarch64-unknown-none-softfloat",
     );
     builder.output_dir = Some(Path::new(&mf).join("target/tmp"));
