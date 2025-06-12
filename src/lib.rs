@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
@@ -40,7 +40,7 @@ impl Builder {
         self
     }
 
-    pub fn source_dir<T: AsRef<str>>(mut self, dir: T) -> Self {
+    pub fn source_dir<T: AsRef<Path>>(mut self, dir: T) -> Self {
         self.source_dir = Some(PathBuf::from(dir.as_ref()));
         self
     }
