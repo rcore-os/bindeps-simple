@@ -18,6 +18,7 @@ pub struct Builder {
     pub target: String,
     pub output_dir: Option<PathBuf>,
     pub cargo_args: Vec<String>,
+    pub source_dir: Option<PathBuf>,
 }
 impl Builder {
     pub fn new(name: &str, version: &str, target: &str) -> Self {
@@ -36,6 +37,11 @@ impl Builder {
 
     pub fn feature(mut self, feature: &str) -> Self {
         self.features.push(feature.to_string());
+        self
+    }
+
+    pub fn source_dir<T: AsRef<str>>(mut self, dir: T) -> Self {
+        self.source_dir = Some(PathBuf::from(dir.as_ref()));
         self
     }
 
@@ -64,6 +70,7 @@ impl Builder {
             target: self.target,
             output_dir,
             cargo_args: self.cargo_args,
+            source_dir: self.source_dir,
             ..Default::default()
         }
         .run()
@@ -79,6 +86,7 @@ pub struct BinCrate {
     pub features: Vec<String>,
     pub target: String,
     pub output_dir: PathBuf,
+    source_dir: Option<PathBuf>,
     cargo_args: Vec<String>,
     crate_dir: PathBuf,
     base_dir: PathBuf,
@@ -86,28 +94,32 @@ pub struct BinCrate {
 
 impl BinCrate {
     pub fn run(&mut self) -> Result<()> {
-        self.base_dir = std::env::temp_dir()
-            .canonicalize()
-            .unwrap()
-            .join("rust-bindeps-simple");
-        println!("tmp  dir: {}", self.base_dir.display());
-        create_dir_all(&self.base_dir).context("创建目录失败")?;
-        // 构建 crate 唯一标识目录 (如 target/tmp/serde-1.0.0)
-        self.crate_dir = self
-            .base_dir
-            .join(format!("{}-{}", self.name, self.version));
-
-        // 检查是否已存在且不需要强制重建
-        if self.crate_dir.exists() && !self.force_rebuild {
-            println!("已存在缓存: {:?}", self.crate_dir);
+        if let Some(source_dir) = &self.source_dir {
+            self.crate_dir = source_dir.to_path_buf();
         } else {
-            // 清理旧目录 (如果存在)
-            if self.crate_dir.exists() {
-                fs::remove_dir_all(&self.crate_dir)?;
-            }
+            self.base_dir = std::env::temp_dir()
+                .canonicalize()
+                .unwrap()
+                .join("rust-bindeps-simple");
+            println!("tmp  dir: {}", self.base_dir.display());
+            create_dir_all(&self.base_dir).context("创建目录失败")?;
+            // 构建 crate 唯一标识目录 (如 target/tmp/serde-1.0.0)
+            self.crate_dir = self
+                .base_dir
+                .join(format!("{}-{}", self.name, self.version));
 
-            // 下载并解压源码
-            self.download_crate()?;
+            // 检查是否已存在且不需要强制重建
+            if self.crate_dir.exists() && !self.force_rebuild {
+                println!("已存在缓存: {:?}", self.crate_dir);
+            } else {
+                // 清理旧目录 (如果存在)
+                if self.crate_dir.exists() {
+                    fs::remove_dir_all(&self.crate_dir)?;
+                }
+
+                // 下载并解压源码
+                self.download_crate()?;
+            }
         }
 
         self.build_crate()?;
