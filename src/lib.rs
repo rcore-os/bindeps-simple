@@ -17,6 +17,7 @@ pub struct Builder {
     pub features: Vec<String>,
     pub target: String,
     pub output_dir: Option<PathBuf>,
+    pub cargo_args: Vec<String>,
 }
 impl Builder {
     pub fn new(name: &str, version: &str, target: &str) -> Self {
@@ -38,6 +39,17 @@ impl Builder {
         self
     }
 
+    pub fn cargo_args<T: AsRef<str>>(mut self, args: &[T]) -> Self {
+        self.cargo_args
+            .extend(args.iter().map(|s| s.as_ref().to_string()));
+        self
+    }
+
+    pub fn cargo_arg<T: AsRef<str>>(mut self, arg: T) -> Self {
+        self.cargo_args.push(arg.as_ref().to_string());
+        self
+    }
+
     pub fn build(self) -> Result<()> {
         let output_dir = self
             .output_dir
@@ -51,6 +63,7 @@ impl Builder {
             features: self.features,
             target: self.target,
             output_dir,
+            cargo_args: self.cargo_args,
             ..Default::default()
         }
         .run()
@@ -66,6 +79,7 @@ pub struct BinCrate {
     pub features: Vec<String>,
     pub target: String,
     pub output_dir: PathBuf,
+    cargo_args: Vec<String>,
     crate_dir: PathBuf,
     base_dir: PathBuf,
 }
@@ -157,6 +171,10 @@ impl BinCrate {
         }
         for f in self.features.iter() {
             cargo.arg("--features").arg(f);
+        }
+
+        for a in self.cargo_args.iter() {
+            cargo.arg(a);
         }
 
         println!("cmd: {:?}", cargo);
