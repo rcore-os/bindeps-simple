@@ -104,13 +104,13 @@ impl BinCrate {
                 .no_deps()
                 .exec()
                 .unwrap();
-            let pkg = metadata
-                .packages
-                .iter()
-                .find(|p| p.name.eq_ignore_ascii_case(&self.name))
-                .unwrap();
 
-            println!("{} manifest at: {:?}", self.name, pkg.manifest_path);
+            for pkg in metadata.packages {
+                println!("   dep: {}", pkg.name);
+                if p.name.eq_ignore_ascii_case(&self.name) {
+                    println!("   {} manifest at: {:?}", self.name, pkg.manifest_path);
+                }
+            }
         }
 
         self.base_dir = std::env::temp_dir()
