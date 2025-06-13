@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use cargo_metadata::MetadataCommand;
 use flate2::read::GzDecoder;
 use std::fs::{self, create_dir_all};
 use std::io::Cursor;
@@ -19,6 +20,7 @@ pub struct Builder {
     pub output_dir: Option<PathBuf>,
     pub cargo_args: Vec<String>,
     pub source_dir: Option<PathBuf>,
+    pub manifest_path: Option<PathBuf>,
 }
 impl Builder {
     pub fn new(name: &str, version: &str, target: &str) -> Self {
@@ -71,6 +73,7 @@ impl Builder {
             output_dir,
             cargo_args: self.cargo_args,
             source_dir: self.source_dir,
+            manifest_path: self.manifest_path,
             ..Default::default()
         }
         .run()
@@ -90,10 +93,26 @@ pub struct BinCrate {
     cargo_args: Vec<String>,
     crate_dir: PathBuf,
     base_dir: PathBuf,
+    manifest_path: Option<PathBuf>,
 }
 
 impl BinCrate {
     pub fn run(&mut self) -> Result<()> {
+        if let Some(mf) = &self.manifest_path {
+            let metadata = MetadataCommand::new()
+                .manifest_path(mf)
+                .no_deps()
+                .exec()
+                .unwrap();
+            let pkg = metadata
+                .packages
+                .iter()
+                .find(|p| p.name.eq_ignore_ascii_case(&self.name))
+                .unwrap();
+
+            println!("{} manifest at: {:?}", self.name, pkg.manifest_path);
+        }
+
         self.base_dir = std::env::temp_dir()
             .canonicalize()
             .unwrap()
