@@ -68,7 +68,8 @@ fn get_local() -> PathBuf {
 }
 
 fn get_cratesio() -> PathBuf {
-    let url = "https://crates.io/api/v1/crates/pie-boot/0.1.4/download";
+    let version = "0.1.6";
+    let url = format!("https://crates.io/api/v1/crates/pie-boot/{version}/download");
 
     // 发送 HTTP 请求
     let response = reqwest::blocking::get(url)
@@ -88,5 +89,7 @@ fn get_cratesio() -> PathBuf {
     archive.unpack(target_dir).unwrap();
     println!("解压完成");
 
-    target_dir.join("pie-boot-0.1.4").join("Cargo.toml")
+    target_dir
+        .join(format!("pie-boot-{version}"))
+        .join("Cargo.toml")
 }
