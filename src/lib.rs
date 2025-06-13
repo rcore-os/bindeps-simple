@@ -1,33 +1,26 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use anyhow::{Context, Result};
-use cargo_metadata::MetadataCommand;
-use flate2::read::GzDecoder;
-use std::fs::{self, create_dir_all};
-use std::io::Cursor;
+use anyhow::{Result, anyhow};
 use std::process::{Command, Stdio};
-use tar::Archive;
 
 #[derive(Default)]
 pub struct Builder {
     pub name: String,
-    pub version: String,
     pub force_rebuild: bool,
     pub env: Vec<(String, String)>,
     pub features: Vec<String>,
-    pub target: String,
+    pub target: Option<String>,
     pub output_dir: Option<PathBuf>,
     pub cargo_args: Vec<String>,
-    pub source_dir: Option<PathBuf>,
     pub manifest_path: Option<PathBuf>,
+    /// 调用Bindeps的crate名，用于测试
+    pub user_crate_name: Option<String>,
 }
 impl Builder {
-    pub fn new(name: &str, version: &str, target: &str) -> Self {
+    pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
-            version: version.to_string(),
-            target: target.to_string(),
             ..Default::default()
         }
     }
@@ -42,11 +35,6 @@ impl Builder {
         self
     }
 
-    pub fn source_dir<T: AsRef<Path>>(mut self, dir: T) -> Self {
-        self.source_dir = Some(PathBuf::from(dir.as_ref()));
-        self
-    }
-
     pub fn cargo_args<T: AsRef<str>>(mut self, args: &[T]) -> Self {
         self.cargo_args
             .extend(args.iter().map(|s| s.as_ref().to_string()));
@@ -58,21 +46,28 @@ impl Builder {
         self
     }
 
-    pub fn build(self) -> Result<()> {
+    pub fn target(mut self, target: &str) -> Self {
+        self.target = Some(target.to_string());
+        self
+    }
+
+    pub fn build(self) -> Result<Output> {
         let output_dir = self
             .output_dir
             .unwrap_or_else(|| PathBuf::from(std::env::var("OUT_DIR").unwrap()));
 
+        let target = self.target.unwrap_or_else(|| {
+            std::env::var("TARGET").expect("TARGET environment variable is not set")
+        });
+
         BinCrate {
             name: self.name,
-            version: self.version,
             force_rebuild: self.force_rebuild,
             envs: self.env,
             features: self.features,
-            target: self.target,
+            target,
             output_dir,
             cargo_args: self.cargo_args,
-            source_dir: self.source_dir,
             manifest_path: self.manifest_path,
             ..Default::default()
         }
@@ -83,120 +78,50 @@ impl Builder {
 #[derive(Default)]
 pub struct BinCrate {
     pub name: String,
-    pub version: String,
     pub force_rebuild: bool,
     pub envs: Vec<(String, String)>,
     pub features: Vec<String>,
     pub target: String,
     pub output_dir: PathBuf,
-    source_dir: Option<PathBuf>,
     cargo_args: Vec<String>,
-    crate_dir: PathBuf,
-    base_dir: PathBuf,
     manifest_path: Option<PathBuf>,
+    target_dir: PathBuf,
 }
 
 impl BinCrate {
-    pub fn run(&mut self) -> Result<()> {
-        if let Some(mf) = &self.manifest_path {
-            let metadata = MetadataCommand::new()
-                .manifest_path(mf)
-                .no_deps()
-                .exec()
-                .unwrap();
+    pub fn run(&mut self) -> Result<Output> {
+        let manifest_path = self
+            .manifest_path
+            .clone()
+            .unwrap_or_else(|| std::env::var("CARGO_MANIFEST_PATH").unwrap().into());
 
-            for pkg in metadata.packages {
-                println!("   dep: {}", pkg.name);
-                if pkg.name.eq_ignore_ascii_case(&self.name) {
-                    println!("   {} manifest at: {:?}", self.name, pkg.manifest_path);
-                }
-            }
-        }
+        let mut cargo_metadata = cargo_metadata::MetadataCommand::new();
 
-        self.base_dir = std::env::temp_dir()
-            .canonicalize()
-            .unwrap()
-            .join("rust-bindeps-simple");
-        println!("tmp  dir: {}", self.base_dir.display());
-        create_dir_all(&self.base_dir).context("创建目录失败")?;
+        let metadata = cargo_metadata.manifest_path(&manifest_path).exec()?;
 
-        if let Some(source_dir) = &self.source_dir {
-            use rand::seq::IndexedRandom;
-            let mut rng = &mut rand::rng();
-            let sample =
-                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".as_bytes();
-            let suffix = sample
-                .choose_multiple(&mut rng, 12)
-                .cloned()
-                .collect::<Vec<_>>();
+        let package = metadata
+            .packages
+            .iter()
+            .find(|p| p.name.eq_ignore_ascii_case(&self.name))
+            .ok_or_else(|| anyhow!("Cannot find package {}, is it has lib.rs?", &self.name))?;
 
-            let suffix = String::from_utf8_lossy(&suffix);
+        println!("mf: {}", package.manifest_path);
 
-            // 构建 crate 唯一标识目录 (如 target/tmp/serde-1.0.0)
-            self.crate_dir = self.base_dir.join(format!("{}-{}", self.name, suffix));
-            if self.crate_dir.exists() {
-                // 删除目录
-                std::fs::remove_dir_all(&self.crate_dir).unwrap();
-            }
-            std::fs::create_dir_all(&self.crate_dir).unwrap();
+        self.manifest_path = Some(package.manifest_path.as_os_str().into());
 
-            // 复制 source_dir 内容到 crate_dir
-            copy_dir_recursive(source_dir, &self.crate_dir)?;
-        } else {
-            // 构建 crate 唯一标识目录 (如 target/tmp/serde-1.0.0)
-            self.crate_dir = self
-                .base_dir
-                .join(format!("{}-{}", self.name, self.version));
-
-            // 检查是否已存在且不需要强制重建
-            if self.crate_dir.exists() && !self.force_rebuild {
-                println!("已存在缓存: {:?}", self.crate_dir);
-            } else {
-                // 清理旧目录 (如果存在)
-                if self.crate_dir.exists() {
-                    fs::remove_dir_all(&self.crate_dir)?;
-                }
-
-                // 下载并解压源码
-                self.download_crate()?;
-            }
-        }
+        let self_meta = cargo_metadata::MetadataCommand::new().exec()?;
+        self.target_dir = self_meta.target_directory.as_os_str().into();
 
         self.build_crate()?;
-        Ok(())
-    }
-
-    /// 下载并解压 crate 源码
-    fn download_crate(&self) -> Result<()> {
-        let url = format!(
-            "https://crates.io/api/v1/crates/{}/{}/download",
-            self.name, self.version
-        );
-
-        println!("正在下载: {url}");
-
-        // 发送 HTTP 请求
-        let response = reqwest::blocking::get(&url)?.error_for_status()?;
-        let bytes = response.bytes()?;
-
-        // 解压 gzip 流
-        let tar = GzDecoder::new(Cursor::new(bytes));
-        let mut archive = Archive::new(tar);
-
-        // 解压到目标目录
-        archive.unpack(&self.base_dir)?;
-        println!("解压完成");
-
-        Ok(())
+        Ok(Output {
+            dir: self.output_dir.clone(),
+            elf: self.output_dir.join(&self.name),
+        })
     }
 
     /// 编译 crate 并返回可执行文件路径
     fn build_crate(&self) -> Result<()> {
-        // 确保包含 Cargo.toml
-        if !self.crate_dir.join("Cargo.toml").exists() {
-            anyhow::bail!("目录中缺少 Cargo.toml: {:?}", self.crate_dir);
-        }
-
+        let manifest = self.manifest_path.as_ref().unwrap().clone();
         println!("开始编译...");
 
         let filtered_env: HashMap<String, String> = std::env::vars()
@@ -211,12 +136,12 @@ impl BinCrate {
             .arg("-p")
             .arg(&self.name)
             .arg("--target-dir")
-            .arg(self.output_dir.join(format!("{}-target", self.name)))
+            .arg(self.target_dir.join("bindeps"))
             .arg("--artifact-dir")
             .arg(&self.output_dir)
+            .current_dir(manifest.parent().unwrap())
             .env_clear()
             .envs(filtered_env)
-            .current_dir(&self.crate_dir)
             .stdout(Stdio::inherit()) // 将输出传递到父进程
             .stderr(Stdio::inherit()); // 将错误传递到父进程
 
@@ -244,23 +169,8 @@ impl BinCrate {
     }
 }
 
-// 递归复制函数
-fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
-    if !dst.exists() {
-        create_dir_all(dst)?;
-    }
-
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-
-        if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
-            fs::copy(&src_path, &dst_path)?;
-        }
-    }
-
-    Ok(())
+#[derive(Debug, Clone)]
+pub struct Output {
+    pub dir: PathBuf,
+    pub elf: PathBuf,
 }
