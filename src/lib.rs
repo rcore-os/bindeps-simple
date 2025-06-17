@@ -124,9 +124,8 @@ impl BinCrate {
         let manifest = self.manifest_path.as_ref().unwrap().clone();
         println!("开始编译...");
 
-        let filtered_env: HashMap<String, String> = std::env::vars()
-            .filter(|(k, _)| k == "TERM" || k == "TZ" || k == "LANG" || k == "PATH")
-            .collect();
+        let filtered_env: HashMap<String, String> =
+            std::env::vars().filter(|(k, _)| !is_rust_env(k)).collect();
 
         let mut cargo = Command::new("cargo");
 
@@ -173,4 +172,8 @@ impl BinCrate {
 pub struct Output {
     pub dir: PathBuf,
     pub elf: PathBuf,
+}
+
+fn is_rust_env(env: &str) -> bool {
+    env.starts_with("CARGO_") || env.starts_with("RUST")
 }
