@@ -16,6 +16,7 @@ pub struct Builder {
     pub manifest_path: Option<PathBuf>,
     /// 调用Bindeps的crate名，用于测试
     pub user_crate_name: Option<String>,
+    pub target_dir: Option<PathBuf>,
 }
 impl Builder {
     pub fn new(name: &str) -> Self {
@@ -60,6 +61,14 @@ impl Builder {
             std::env::var("TARGET").expect("TARGET environment variable is not set")
         });
 
+        let target_dir = self.target_dir.unwrap_or_else(|| {
+            PathBuf::from(std::env::var("OUT_DIR").unwrap())
+                .ancestors()
+                .nth(3)
+                .unwrap()
+                .join("bindeps")
+        });
+
         BinCrate {
             name: self.name,
             force_rebuild: self.force_rebuild,
@@ -69,7 +78,7 @@ impl Builder {
             output_dir,
             cargo_args: self.cargo_args,
             manifest_path: self.manifest_path,
-            ..Default::default()
+            target_dir,
         }
         .run()
     }
@@ -109,9 +118,6 @@ impl BinCrate {
 
         self.manifest_path = Some(package.manifest_path.as_os_str().into());
 
-        let self_meta = cargo_metadata::MetadataCommand::new().exec()?;
-        self.target_dir = self_meta.target_directory.as_os_str().into();
-
         self.build_crate()?;
         Ok(Output {
             dir: self.output_dir.clone(),
@@ -135,7 +141,7 @@ impl BinCrate {
             .arg("-p")
             .arg(&self.name)
             .arg("--target-dir")
-            .arg(self.target_dir.join("bindeps"))
+            .arg(&self.target_dir)
             .arg("--artifact-dir")
             .arg(&self.output_dir)
             .current_dir(manifest.parent().unwrap())

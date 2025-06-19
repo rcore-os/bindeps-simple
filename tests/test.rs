@@ -20,6 +20,7 @@ fn test_local() {
     builder.manifest_path = Some(manifest);
     builder.user_crate_name = Some("pie-boot".into());
     builder.output_dir = Some(Path::new(&mf).join("target/tmp"));
+    builder.target_dir = Some(Path::new(&mf).join("target"));
 
     println!("building..");
     builder
