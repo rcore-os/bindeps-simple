@@ -20,14 +20,15 @@ fn test_local() {
     builder.manifest_path = Some(manifest);
     builder.user_crate_name = Some("pie-boot".into());
     builder.output_dir = Some(Path::new(&mf).join("target/tmp"));
-    builder.target_dir = Some(Path::new(&mf).join("target"));
 
     println!("building..");
-    builder
+    let out = builder
         .target("aarch64-unknown-none-softfloat")
         .cargo_args(&["-Z", "build-std=core,alloc"])
         .build()
         .unwrap();
+
+    assert!(out.elf.exists());
 }
 
 #[test]
@@ -41,14 +42,15 @@ fn test_crate_io() {
     builder.manifest_path = Some(manifest);
     builder.user_crate_name = Some("pie-boot".into());
     builder.output_dir = Some(Path::new(&mf).join("target/tmp"));
-    builder.target_dir = Some(Path::new(&mf).join("target"));
 
     println!("building..");
-    builder
+    let out = builder
         .target("aarch64-unknown-none-softfloat")
         .cargo_args(&["-Z", "build-std=core,alloc"])
         .build()
         .unwrap();
+
+    assert!(out.elf.exists());
 }
 
 fn get_local() -> PathBuf {

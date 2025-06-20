@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
@@ -16,7 +15,6 @@ pub struct Builder {
     pub manifest_path: Option<PathBuf>,
     /// 调用Bindeps的crate名，用于测试
     pub user_crate_name: Option<String>,
-    pub target_dir: Option<PathBuf>,
 }
 impl Builder {
     pub fn new(name: &str) -> Self {
@@ -61,14 +59,6 @@ impl Builder {
             std::env::var("TARGET").expect("TARGET environment variable is not set")
         });
 
-        let target_dir = self.target_dir.unwrap_or_else(|| {
-            PathBuf::from(std::env::var("OUT_DIR").unwrap())
-                .ancestors()
-                .nth(4)
-                .unwrap()
-                .join("bindeps")
-        });
-
         BinCrate {
             name: self.name,
             force_rebuild: self.force_rebuild,
@@ -78,7 +68,6 @@ impl Builder {
             output_dir,
             cargo_args: self.cargo_args,
             manifest_path: self.manifest_path,
-            target_dir,
         }
         .run()
     }
@@ -94,7 +83,6 @@ pub struct BinCrate {
     pub output_dir: PathBuf,
     cargo_args: Vec<String>,
     manifest_path: Option<PathBuf>,
-    target_dir: PathBuf,
 }
 
 impl BinCrate {
@@ -115,13 +103,24 @@ impl BinCrate {
             .ok_or_else(|| anyhow!("Cannot find package {}, is it has lib.rs?", &self.name))?;
 
         println!("mf: {}", package.manifest_path);
+        let mf_path = package.manifest_path.as_str();
+        if mf_path.contains(".cargo/registry") || mf_path.contains(".cargo\\registry") {
+            println!("is online");
+        } else {
+            println!("is local");
+            println!(
+                "cargo:rerun-if-changed={}",
+                package.manifest_path.parent().unwrap()
+            );
+        }
 
         self.manifest_path = Some(package.manifest_path.as_os_str().into());
 
         self.build_crate()?;
+        let out_dir = self.output_dir.join("bin");
         Ok(Output {
-            dir: self.output_dir.clone(),
-            elf: self.output_dir.join(&self.name),
+            dir: out_dir.clone(),
+            elf: out_dir.join(&self.name),
         })
     }
 
@@ -130,23 +129,20 @@ impl BinCrate {
         let manifest = self.manifest_path.as_ref().unwrap().clone();
         println!("开始编译...");
 
-        let filtered_env: HashMap<String, String> =
-            std::env::vars().filter(|(k, _)| !is_rust_env(k)).collect();
-
         let mut cargo = Command::new("cargo");
 
         cargo
-            .args(["build", "-Z", "unstable-options", "--release", "--target"])
-            .arg(&self.target)
-            .arg("-p")
+            .arg("install")
             .arg(&self.name)
-            .arg("--target-dir")
-            .arg(&self.target_dir)
-            .arg("--artifact-dir")
+            .args(["--locked", "-Z", "unstable-options", "--target"])
+            .arg(&self.target)
+            .arg("--root")
             .arg(&self.output_dir)
-            .current_dir(manifest.parent().unwrap())
-            .env_clear()
-            .envs(filtered_env)
+            .arg("--path")
+            .arg(manifest.parent().unwrap())
+            .env_remove("RUSTFLAGS")
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .env_remove("RUSTC_WORKSPACE_WRAPPER") // used by clippy
             .stdout(Stdio::inherit()) // 将输出传递到父进程
             .stderr(Stdio::inherit()); // 将错误传递到父进程
 
@@ -161,7 +157,7 @@ impl BinCrate {
             cargo.arg(a);
         }
 
-        println!("cmd: {:?}", cargo);
+        println!("cmd: {cargo:?}");
 
         // 执行 cargo build 并显示实时输出
         let status = cargo.status()?;
@@ -178,8 +174,4 @@ impl BinCrate {
 pub struct Output {
     pub dir: PathBuf,
     pub elf: PathBuf,
-}
-
-fn is_rust_env(env: &str) -> bool {
-    env.starts_with("CARGO_") || env.starts_with("RUST")
 }
