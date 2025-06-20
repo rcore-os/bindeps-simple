@@ -7,7 +7,7 @@ keywords = ["bindeps"]
 license = "MIT"
 name = "bindeps-simple"
 repository = "https://github.com/rcore-os/bindeps-simple"
-version = "0.2.3"
+version = "0.2.4"
 
 [dependencies]
 anyhow = "1.0"

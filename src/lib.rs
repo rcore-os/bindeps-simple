@@ -64,7 +64,7 @@ impl Builder {
         let target_dir = self.target_dir.unwrap_or_else(|| {
             PathBuf::from(std::env::var("OUT_DIR").unwrap())
                 .ancestors()
-                .nth(3)
+                .nth(4)
                 .unwrap()
                 .join("bindeps")
         });
